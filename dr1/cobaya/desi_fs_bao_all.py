@@ -1,7 +1,9 @@
 from pathlib import Path
+from urllib.parse import quote
 import numpy as np
 
 from cobaya.likelihood import Likelihood
+from cobaya.yaml import yaml_load_file
 
 
 list_zrange = [('BGS_BRIGHT-21.5', 0, (0.1, 0.4)), ('LRG', 0, (0.4, 0.6)), ('LRG', 1, (0.6, 0.8)), ('LRG', 2, (0.8, 1.1)), ('ELG_LOPnotqso', 1, (1.1, 1.6)), ('QSO', 0, (0.8, 2.1)), ('Lya', 0, (1.8, 4.2))]
@@ -13,6 +15,7 @@ def dataset_fn(data_dir, tracer, zrange, observable_name='spectrum-poles+bao-rec
         if 'lya' in tracer.lower():
             return data_dir / f'likelihood_bao_syst_{tracer}_GCcomb_z{zrange[0]:.1f}-{zrange[1]:.1f}.h5'
         return data_dir / f'likelihood_{observable_name}_syst_{tracer}_GCcomb_z{zrange[0]:.1f}-{zrange[1]:.1f}.h5'
+    observable_name = quote(observable_name)
     return data_dir / f'likelihood_{observable_name}_syst-rotation-hod-photo_{tracer}_GCcomb_z{zrange[0]:.1f}-{zrange[1]:.1f}_thetacut0.05.h5'
 
 
@@ -38,7 +41,15 @@ def get_physical_stochastic_settings(tracer=None):
 
 
 class desi_fs_bao_all(Likelihood):
-    
+    _defaults = yaml_load_file(str(Path(__file__).with_suffix('.yaml'))) or {}
+    speed = _defaults.get('speed', 40)
+    stop_at_error = _defaults.get('stop_at_error', True)
+    solve = _defaults.get('solve', 'marg')
+    observable_name = _defaults.get('observable_name', 'spectrum-poles-rotated+bao-recon')
+    tracers = _defaults.get('tracers', None)
+    data_dir = _defaults.get('data_dir', '.')
+    params = _defaults.get('params', {})
+
     # Only meaningful deviation to exact is using camb as engine for fiducial cosmology
     # Typicall offset in the loglikelihood of 0.02 for 1176.98
 
@@ -98,7 +109,7 @@ class desi_fs_bao_all(Likelihood):
             #assert np.allclose(covariance.T, covariance)
             precision = np.linalg.inv(covariance)
             self.precision.append(precision)
-      
+
     def get_requirements(self):
         """Return dictionary specifying quantities calculated by a theory code are needed."""
         return self._requirements
@@ -134,7 +145,7 @@ class desi_fs_bao_all(Likelihood):
             if not has_no_fs:
                 namespace = 'pre_' + name
                 fs_params = {key[len(namespace) + 1:]: value for key, value in params_values.items() if key.startswith(namespace)} | {param: 0. for param in all_marg_params}
-                #fs_params |= {'alpha0p': 10., 'alpha2p': 5., 'sn0p': 5., 'sn2p': 8.} 
+                #fs_params |= {'alpha0p': 10., 'alpha2p': 5., 'sn0p': 5., 'sn2p': 8.}
                 settings = get_physical_stochastic_settings(tracer=tracer.upper()[:3])
                 z = self._requirements['pkpoles']['z'][i]
                 fs_theory, fs_gradient = self.provider.get_pkpoles(fs_params, z=z, **settings, sn=self.shotnoise[i], return_gradient=True)
@@ -151,7 +162,7 @@ class desi_fs_bao_all(Likelihood):
             diff = flattheory - self.flatdata[i]
             loglikelihood = - 1. / 2. * diff.T.dot(self.precision[i]).dot(diff)
             marg_logprior = 0.
-            
+
             if not has_no_fs:
                 # Now analytic marginalization
                 gradient = np.concatenate(gradient)
